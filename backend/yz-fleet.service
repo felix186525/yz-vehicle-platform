@@ -1,0 +1,15 @@
+[Unit]
+Description=Yangzhou Fleet API
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/yz-vehicle-platform
+ExecStart=/usr/bin/python3 /opt/yz-vehicle-platform/app.py
+Restart=always
+RestartSec=3
+Environment=YZ_HOST=127.0.0.1
+Environment=YZ_PORT=9001
+
+[Install]
+WantedBy=multi-user.target

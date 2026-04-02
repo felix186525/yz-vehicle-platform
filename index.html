@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>扬州外事旅游车辆管理平台</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="sidebar">
+        <div>
+          <p class="eyebrow">Yangzhou Fleet OS</p>
+          <h1>扬州外事旅游车辆管理平台</h1>
+          <p class="sub">
+            围绕车、人、单、安、维，支持旅游客运、校车、机场接驳与重大活动保障。
+          </p>
+        </div>
+        <nav class="menu" id="menu"></nav>
+        <div class="status-card">
+          <span>系统状态</span>
+          <strong>运行正常</strong>
+          <small>示例版 / 轻量静态原型</small>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <p class="page-tag" id="page-tag">运营总览</p>
+            <h2 id="page-title">今日运营驾驶舱</h2>
+          </div>
+          <div class="top-actions">
+            <span class="user-chip" id="user-chip">未登录</span>
+            <input id="search" type="search" placeholder="搜车辆 / 司机 / 任务" />
+            <button id="alert-btn" type="button">查看预警</button>
+            <button id="logout-btn" class="ghost" type="button">退出</button>
+          </div>
+        </header>
+
+        <section class="panel active" data-panel="dashboard">
+          <div class="metrics" id="metrics"></div>
+          <div class="grid two">
+            <section class="card">
+              <div class="card-head">
+                <h3>业务结构</h3>
+                <span>当月任务占比</span>
+              </div>
+              <div id="biz-bars" class="bars"></div>
+            </section>
+            <section class="card">
+              <div class="card-head">
+                <h3>近期提醒</h3>
+                <span>证照 / 年检 / 培训</span>
+              </div>
+              <div id="alerts" class="list"></div>
+            </section>
+          </div>
+          <div class="grid two">
+            <section class="card">
+              <div class="card-head">
+                <h3>重大活动保障</h3>
+                <span>枣林湾音乐节模拟场景</span>
+              </div>
+              <div class="timeline" id="event-timeline"></div>
+            </section>
+            <section class="card">
+              <div class="card-head">
+                <h3>车队实时状态</h3>
+                <span>运营 / 待命 / 维保</span>
+              </div>
+              <div id="fleet-status" class="list compact"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="panel" data-panel="vehicles">
+          <div class="section-head">
+            <h3>车辆档案</h3>
+            <button type="button" data-open="vehicle">新增车辆</button>
+          </div>
+          <div class="toolbar">
+            <select id="vehicle-filter">
+              <option value="all">全部状态</option>
+              <option value="运营中">运营中</option>
+              <option value="待命">待命</option>
+              <option value="维保中">维保中</option>
+            </select>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>车牌</th>
+                  <th>车型</th>
+                  <th>座位</th>
+                  <th>状态</th>
+                  <th>业务类型</th>
+                  <th>年检</th>
+                  <th>保险</th>
+                  <th>今日任务</th>
+                </tr>
+              </thead>
+              <tbody id="vehicle-rows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel" data-panel="drivers">
+          <div class="section-head">
+            <h3>驾驶员管理</h3>
+            <button type="button" data-open="driver">新增驾驶员</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>姓名</th>
+                  <th>准驾</th>
+                  <th>驾龄</th>
+                  <th>安全评分</th>
+                  <th>排班</th>
+                  <th>资质到期</th>
+                  <th>心理测评</th>
+                </tr>
+              </thead>
+              <tbody id="driver-rows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel" data-panel="users">
+          <div class="section-head">
+            <h3>账号管理</h3>
+            <button type="button" data-open="user">新增账号</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>用户名</th>
+                  <th>姓名</th>
+                  <th>角色</th>
+                  <th>权限</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="user-rows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel" data-panel="dispatch">
+          <div class="section-head">
+            <h3>调度中心</h3>
+            <button type="button" data-open="dispatch">新建派车单</button>
+          </div>
+          <div id="dispatch-cards" class="dispatch-grid"></div>
+        </section>
+
+        <section class="panel" data-panel="safety">
+          <div class="section-head">
+            <h3>安全生产</h3>
+            <button type="button" data-open="safety">上报事件</button>
+          </div>
+          <div class="grid two">
+            <section class="card">
+              <div class="card-head">
+                <h3>安全指标</h3>
+                <span>近 30 天</span>
+              </div>
+              <div id="safety-kpis" class="list compact"></div>
+            </section>
+            <section class="card">
+              <div class="card-head">
+                <h3>隐患与整改</h3>
+                <span>闭环跟踪</span>
+              </div>
+              <div id="safety-issues" class="list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="panel" data-panel="maintenance">
+          <div class="section-head">
+            <h3>维保与能源</h3>
+            <button type="button" data-open="maintenance">创建工单</button>
+          </div>
+          <div class="grid two">
+            <section class="card">
+              <div class="card-head">
+                <h3>维保工单</h3>
+                <span>周期保养 / 故障维修</span>
+              </div>
+              <div id="maintenance-list" class="list"></div>
+            </section>
+            <section class="card">
+              <div class="card-head">
+                <h3>油电成本</h3>
+                <span>单车监控</span>
+              </div>
+              <div id="energy-list" class="list"></div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="modal hidden" id="alert-modal" aria-hidden="true">
+      <div class="modal-card">
+        <div class="card-head">
+          <h3>重点预警</h3>
+          <button id="close-modal" class="ghost" type="button">关闭</button>
+        </div>
+        <div id="modal-body" class="list"></div>
+      </div>
+    </div>
+
+    <div class="modal hidden" id="form-modal" aria-hidden="true">
+      <div class="modal-card form-card">
+        <div class="card-head">
+          <h3 id="form-title">新增数据</h3>
+          <button id="close-form" class="ghost" type="button">关闭</button>
+        </div>
+        <form id="entity-form" class="form-grid"></form>
+      </div>
+    </div>
+
+    <div class="modal" id="login-modal" aria-hidden="false">
+      <div class="modal-card auth-card">
+        <div class="card-head">
+          <h3>平台登录</h3>
+          <span>扬州外事旅游车辆管理平台</span>
+        </div>
+        <form id="login-form" class="form-grid">
+          <div class="field">
+            <label>用户名</label>
+            <input name="username" type="text" placeholder="admin" required />
+          </div>
+          <div class="field">
+            <label>密码</label>
+            <input name="password" type="password" placeholder="admin123" required />
+          </div>
+          <div class="field full">
+            <p class="auth-tip" id="login-tip">可用账号：admin、dispatch、safety、maintenance；默认密码均为 admin123</p>
+          </div>
+          <div class="form-actions">
+            <button type="submit">登录系统</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script src="./main.js"></script>
+  </body>
+</html>
