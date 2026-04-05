@@ -5,6 +5,8 @@ const state = {
   panel: "dashboard",
   q: "",
   vehicleStatus: "all",
+  financeStart: "",
+  financeEnd: "",
   formType: "",
   editId: "",
   token: localStorage.getItem(tokenKey) || "",
@@ -222,6 +224,28 @@ function money(value) {
   return `${Number(value || 0).toFixed(2)} 元`;
 }
 
+function inDateRange(value, start, end) {
+  if (!value) return !start && !end;
+  if (start && value < start) return false;
+  if (end && value > end) return false;
+  return true;
+}
+
+function inSpanRange(startValue, endValue, rangeStart, rangeEnd) {
+  const start = startValue || endValue || "";
+  const end = endValue || startValue || "";
+  if (!rangeStart && !rangeEnd) return true;
+  if (rangeStart && end && end < rangeStart) return false;
+  if (rangeEnd && start && start > rangeEnd) return false;
+  return true;
+}
+
+function dispatchDate(item) {
+  const match = (item.code || "").match(/DY(\d{4})(\d{2})(\d{2})/);
+  if (!match) return "";
+  return `${match[1]}-${match[2]}-${match[3]}`;
+}
+
 async function request(path, options) {
   const resp = await fetch(`${apiBase}${path}`, {
     ...options,
@@ -244,8 +268,9 @@ async function request(path, options) {
 function syncDerived() {
   const d = state.data;
   const vehicles = d.vehicles;
-  const contracts = d.contracts;
-  const settlements = d.settlements;
+  const contracts = d.contracts.filter((v) => inSpanRange(v.startDate, v.endDate, state.financeStart, state.financeEnd));
+  const settlements = d.settlements.filter((v) => inDateRange(v.dueDate, state.financeStart, state.financeEnd));
+  const dispatchList = d.dispatch.filter((v) => inDateRange(dispatchDate(v), state.financeStart, state.financeEnd));
   d.fleet = [
     ["运营中", `${vehicles.filter((v) => v.status === "运营中").length} 台`, "badge"],
     ["待命", `${vehicles.filter((v) => v.status === "待命").length} 台`, "badge"],
@@ -310,7 +335,7 @@ function syncDerived() {
     .map((name) => [`项目 ${name}`, `${projectMap[name].toFixed(0)} 元`, "badge warn"]);
   d.financeInsights = [...topCustomers, ...topProjects];
   const projects = {};
-  d.dispatch.forEach((item) => {
+  dispatchList.forEach((item) => {
     const key = item.project || item.name;
     if (!projects[key]) {
       projects[key] = {
@@ -363,7 +388,7 @@ function syncDerived() {
     .sort((a, b) => b.receivable - a.receivable || b.contractAmount - a.contractAmount);
   d.projectSummary = [
     ["经营项目", String(d.projectStats.length), "按项目聚合"],
-    ["派车订单", String(d.dispatch.length), "调度任务数量"],
+    ["派车订单", String(dispatchList.length), "调度任务数量"],
     ["执行中合同", String(contracts.filter((v) => v.status === "执行中").length), "履约中的合同"],
     ["待回款项目", String(d.projectStats.filter((v) => v.unreceived > 0).length), "需持续跟进"],
   ];
@@ -634,7 +659,10 @@ async function submitForm(e) {
 }
 
 async function exportReport(kind) {
-  const resp = await fetch(`${apiBase}/reports/export?kind=${encodeURIComponent(kind)}`, {
+  const params = new URLSearchParams({ kind });
+  if (state.financeStart) params.set("start", state.financeStart);
+  if (state.financeEnd) params.set("end", state.financeEnd);
+  const resp = await fetch(`${apiBase}/reports/export?${params.toString()}`, {
     headers: {
       ...authHeaders(),
     },
@@ -736,6 +764,18 @@ function bindEvents() {
   $("#close-form").addEventListener("click", closeForm);
   $("#export-project-report").addEventListener("click", () => exportReport("project").catch((err) => alert(err.message)));
   $("#export-settlement-report").addEventListener("click", () => exportReport("settlement").catch((err) => alert(err.message)));
+  $("#finance-apply").addEventListener("click", () => {
+    state.financeStart = $("#finance-start").value;
+    state.financeEnd = $("#finance-end").value;
+    renderAll();
+  });
+  $("#finance-reset").addEventListener("click", () => {
+    state.financeStart = "";
+    state.financeEnd = "";
+    $("#finance-start").value = "";
+    $("#finance-end").value = "";
+    renderAll();
+  });
   $("#alert-modal").addEventListener("click", (e) => {
     if (e.target.id === "alert-modal") $("#alert-modal").classList.add("hidden");
   });

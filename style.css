@@ -221,6 +221,18 @@ button.ghost {
   margin-bottom: 16px;
 }
 
+.date-range {
+  display: flex;
+  gap: 12px;
+  align-items: end;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.date-range .field {
+  min-width: 180px;
+}
+
 .metric,
 .card,
 .dispatch-item {

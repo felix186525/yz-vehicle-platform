@@ -92,6 +92,35 @@ def table_rows(conn, table):
     return dict_rows(conn.execute(sql).fetchall())
 
 
+def in_date_range(value, start, end):
+    if not value:
+        return (not start) and (not end)
+    if start and value < start:
+        return False
+    if end and value > end:
+        return False
+    return True
+
+
+def in_span_range(start_value, end_value, range_start, range_end):
+    start = start_value or end_value or ""
+    end = end_value or start_value or ""
+    if not range_start and not range_end:
+        return True
+    if range_start and end and end < range_start:
+        return False
+    if range_end and start and start > range_end:
+        return False
+    return True
+
+
+def dispatch_date(item):
+    code = item.get("code") or ""
+    if len(code) >= 10 and code.startswith("DY") and code[2:10].isdigit():
+        return "{0}-{1}-{2}".format(code[2:6], code[6:8], code[8:10])
+    return ""
+
+
 def build_project_stats(dispatch, contracts, settlements):
     projects = {}
     for item in dispatch:
@@ -140,6 +169,13 @@ def build_project_stats(dispatch, contracts, settlements):
         rows.append(item)
     rows.sort(key=lambda v: (v["receivable"], v["contract_amount"]), reverse=True)
     return rows
+
+
+def filter_finance_rows(dispatch, contracts, settlements, start, end):
+    filtered_dispatch = [item for item in dispatch if in_date_range(dispatch_date(item), start, end)]
+    filtered_contracts = [item for item in contracts if in_span_range(item.get("startDate"), item.get("endDate"), start, end)]
+    filtered_settlements = [item for item in settlements if in_date_range(item.get("dueDate"), start, end)]
+    return filtered_dispatch, filtered_contracts, filtered_settlements
 
 
 def public_user(row):
@@ -526,12 +562,15 @@ class Handler(BaseHTTPRequestHandler):
                 return
             query = parse_qs(urlparse(self.path).query or "")
             kind = (query.get("kind") or ["project"])[0]
+            start = (query.get("start") or [""])[0]
+            end = (query.get("end") or [""])[0]
             conn = db()
             customers = table_rows(conn, "customers")
             contracts = table_rows(conn, "contracts")
             settlements = table_rows(conn, "settlements")
             dispatch = table_rows(conn, "dispatch")
             conn.close()
+            dispatch, contracts, settlements = filter_finance_rows(dispatch, contracts, settlements, start, end)
             date_tag = datetime.utcnow().strftime("%Y%m%d")
             if kind == "project":
                 rows = build_project_stats(dispatch, contracts, settlements)
@@ -547,9 +586,10 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 return self.send_csv("settlement-report-{0}.csv".format(date_tag), content)
             if kind == "customer":
+                customer_names = set([item["customerName"] for item in contracts])
                 content = csv_text(
                     ["客户名称", "客户类型", "联系人", "电话", "资信", "合作状态", "备注", "合同数"],
-                    [[v["name"], v["category"], v["contact"], v["phone"], v["creditLevel"], v["status"], v["note"], len([item for item in contracts if item["customerName"] == v["name"]])] for v in customers],
+                    [[v["name"], v["category"], v["contact"], v["phone"], v["creditLevel"], v["status"], v["note"], len([item for item in contracts if item["customerName"] == v["name"]])] for v in customers if (not start and not end) or v["name"] in customer_names],
                 )
                 return self.send_csv("customer-contract-report-{0}.csv".format(date_tag), content)
             return self.send(404, {"error": "报表类型不存在"})
