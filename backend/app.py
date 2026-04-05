@@ -7,7 +7,7 @@ import sqlite3
 import socketserver
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -64,6 +64,76 @@ def hash_password(text):
 
 def dict_rows(rows):
     return [dict(row) for row in rows]
+
+
+def csv_text(headers, rows):
+    lines = [",".join(headers)]
+    for row in rows:
+        cells = []
+        for value in row:
+            text = str(value if value is not None else "")
+            text = text.replace('"', '""')
+            if "," in text or "\n" in text or '"' in text:
+                text = '"{0}"'.format(text)
+            cells.append(text)
+        lines.append(",".join(cells))
+    return "\n".join(lines) + "\n"
+
+
+def table_rows(conn, table):
+    fields = TABLE_FIELDS[table]
+    sql = "select id, {0} from {1} order by created_at desc".format(", ".join(fields), table)
+    return dict_rows(conn.execute(sql).fetchall())
+
+
+def build_project_stats(dispatch, contracts, settlements):
+    projects = {}
+    for item in dispatch:
+        key = item.get("project") or item.get("name")
+        if key not in projects:
+            projects[key] = {
+                "project_name": key,
+                "customer_name": item.get("customer") or "未绑定客户",
+                "order_count": 0,
+                "contract_amount": 0.0,
+                "receivable": 0.0,
+                "received": 0.0,
+            }
+        projects[key]["order_count"] += 1
+    for item in contracts:
+        key = item.get("projectName") or item.get("code")
+        if key not in projects:
+            projects[key] = {
+                "project_name": key,
+                "customer_name": item.get("customerName") or "未绑定客户",
+                "order_count": 0,
+                "contract_amount": 0.0,
+                "receivable": 0.0,
+                "received": 0.0,
+            }
+        projects[key]["customer_name"] = item.get("customerName") or projects[key]["customer_name"]
+        projects[key]["contract_amount"] += float(item.get("amount") or 0)
+    for item in settlements:
+        key = item.get("projectName") or item.get("code")
+        if key not in projects:
+            projects[key] = {
+                "project_name": key,
+                "customer_name": item.get("customerName") or "未绑定客户",
+                "order_count": 0,
+                "contract_amount": 0.0,
+                "receivable": 0.0,
+                "received": 0.0,
+            }
+        projects[key]["customer_name"] = item.get("customerName") or projects[key]["customer_name"]
+        projects[key]["receivable"] += float(item.get("receivable") or 0)
+        projects[key]["received"] += float(item.get("received") or 0)
+    rows = []
+    for key in projects:
+        item = projects[key]
+        item["unreceived"] = item["receivable"] - item["received"]
+        rows.append(item)
+    rows.sort(key=lambda v: (v["receivable"], v["contract_amount"]), reverse=True)
+    return rows
 
 
 def public_user(row):
@@ -325,6 +395,15 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
+    def send_csv(self, filename, content):
+        raw = content.encode("utf-8-sig")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/csv; charset=utf-8")
+        self.send_header("Content-Disposition", 'attachment; filename="{0}"'.format(filename))
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
     def unauthorized(self):
         self.send(401, {"error": "未登录或登录已失效"})
 
@@ -378,6 +457,39 @@ class Handler(BaseHTTPRequestHandler):
                 payload[table] = dict_rows(conn.execute(sql).fetchall())
             conn.close()
             return self.send(200, payload)
+        if path == "/api/reports/export":
+            user = self.require_auth()
+            if not user:
+                return
+            query = parse_qs(urlparse(self.path).query or "")
+            kind = (query.get("kind") or ["project"])[0]
+            conn = db()
+            customers = table_rows(conn, "customers")
+            contracts = table_rows(conn, "contracts")
+            settlements = table_rows(conn, "settlements")
+            dispatch = table_rows(conn, "dispatch")
+            conn.close()
+            date_tag = datetime.utcnow().strftime("%Y%m%d")
+            if kind == "project":
+                rows = build_project_stats(dispatch, contracts, settlements)
+                content = csv_text(
+                    ["项目", "客户", "订单数", "合同额", "应收", "已收", "未收"],
+                    [[v["project_name"], v["customer_name"], v["order_count"], "{0:.2f}".format(v["contract_amount"]), "{0:.2f}".format(v["receivable"]), "{0:.2f}".format(v["received"]), "{0:.2f}".format(v["unreceived"])] for v in rows],
+                )
+                return self.send_csv("project-report-{0}.csv".format(date_tag), content)
+            if kind == "settlement":
+                content = csv_text(
+                    ["结算单号", "合同编号", "客户", "项目", "应收", "已收", "未收", "到期日", "状态", "备注"],
+                    [[v["code"], v["contractCode"], v["customerName"], v["projectName"], "{0:.2f}".format(float(v["receivable"] or 0)), "{0:.2f}".format(float(v["received"] or 0)), "{0:.2f}".format(float(v["receivable"] or 0) - float(v["received"] or 0)), v["dueDate"], v["status"], v["note"]] for v in settlements],
+                )
+                return self.send_csv("settlement-report-{0}.csv".format(date_tag), content)
+            if kind == "customer":
+                content = csv_text(
+                    ["客户名称", "客户类型", "联系人", "电话", "资信", "合作状态", "备注", "合同数"],
+                    [[v["name"], v["category"], v["contact"], v["phone"], v["creditLevel"], v["status"], v["note"], len([item for item in contracts if item["customerName"] == v["name"]])] for v in customers],
+                )
+                return self.send_csv("customer-contract-report-{0}.csv".format(date_tag), content)
+            return self.send(404, {"error": "报表类型不存在"})
         self.send(404, {"error": "接口不存在"})
 
     def do_POST(self):

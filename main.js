@@ -48,6 +48,9 @@ const state = {
     safetyKpis: [],
     financeSummary: [],
     financeInsights: [],
+    projectSummary: [],
+    projectStats: [],
+    reportActions: [],
   },
 };
 
@@ -215,6 +218,10 @@ function authHeaders() {
   return state.token ? { Authorization: `Bearer ${state.token}` } : {};
 }
 
+function money(value) {
+  return `${Number(value || 0).toFixed(2)} 元`;
+}
+
 async function request(path, options) {
   const resp = await fetch(`${apiBase}${path}`, {
     ...options,
@@ -302,6 +309,69 @@ function syncDerived() {
     .slice(0, 3)
     .map((name) => [`项目 ${name}`, `${projectMap[name].toFixed(0)} 元`, "badge warn"]);
   d.financeInsights = [...topCustomers, ...topProjects];
+  const projects = {};
+  d.dispatch.forEach((item) => {
+    const key = item.project || item.name;
+    if (!projects[key]) {
+      projects[key] = {
+        projectName: key,
+        customerName: item.customer || "未绑定客户",
+        orderCount: 0,
+        contractAmount: 0,
+        receivable: 0,
+        received: 0,
+      };
+    }
+    projects[key].orderCount += 1;
+  });
+  contracts.forEach((item) => {
+    const key = item.projectName || item.code;
+    if (!projects[key]) {
+      projects[key] = {
+        projectName: key,
+        customerName: item.customerName || "未绑定客户",
+        orderCount: 0,
+        contractAmount: 0,
+        receivable: 0,
+        received: 0,
+      };
+    }
+    projects[key].customerName = item.customerName || projects[key].customerName;
+    projects[key].contractAmount += Number(item.amount || 0);
+  });
+  settlements.forEach((item) => {
+    const key = item.projectName || item.code;
+    if (!projects[key]) {
+      projects[key] = {
+        projectName: key,
+        customerName: item.customerName || "未绑定客户",
+        orderCount: 0,
+        contractAmount: 0,
+        receivable: 0,
+        received: 0,
+      };
+    }
+    projects[key].customerName = item.customerName || projects[key].customerName;
+    projects[key].receivable += Number(item.receivable || 0);
+    projects[key].received += Number(item.received || 0);
+  });
+  d.projectStats = Object.keys(projects)
+    .map((key) => ({
+      ...projects[key],
+      unreceived: projects[key].receivable - projects[key].received,
+    }))
+    .sort((a, b) => b.receivable - a.receivable || b.contractAmount - a.contractAmount);
+  d.projectSummary = [
+    ["经营项目", String(d.projectStats.length), "按项目聚合"],
+    ["派车订单", String(d.dispatch.length), "调度任务数量"],
+    ["执行中合同", String(contracts.filter((v) => v.status === "执行中").length), "履约中的合同"],
+    ["待回款项目", String(d.projectStats.filter((v) => v.unreceived > 0).length), "需持续跟进"],
+  ];
+  d.reportActions = [
+    ["项目经营统计 CSV", "导出项目、订单、收入和回款聚合数据", "project"],
+    ["结算回款报表 CSV", "导出结算单与到期回款跟踪数据", "settlement"],
+    ["客户合同台账 CSV", "导出客户与合同基础台账", "customer"],
+  ];
 }
 
 function renderMenu() {
@@ -402,7 +472,15 @@ function renderFinance() {
   $("#finance-summary").innerHTML = state.data.financeSummary
     .map(([label, value, tip]) => `<article class="metric"><span class="muted">${label}</span><strong>${value}</strong><small class="muted">${tip}</small></article>`)
     .join("");
+  $("#project-summary").innerHTML = state.data.projectSummary
+    .map(([label, value, tip]) => `<article class="metric"><span class="muted">${label}</span><strong>${value}</strong><small class="muted">${tip}</small></article>`)
+    .join("");
   renderList("#finance-insights", state.data.financeInsights, (v) => `<div class="list-item"><strong>${v[0]}</strong><span class="${v[2]}">${v[1]}</span></div>`);
+  $("#project-rows").innerHTML = state.data.projectStats
+    .filter((v) => !state.q.trim() || Object.values(v).join(" ").includes(state.q.trim()))
+    .map((v) => `<tr><td>${v.projectName}</td><td>${v.customerName}</td><td>${v.orderCount}</td><td>${money(v.contractAmount)}</td><td>${money(v.receivable)}</td><td>${money(v.received)}</td><td><span class="${badgeClass(v.unreceived > 0 ? "warn" : "ok")}">${money(v.unreceived)}</span></td></tr>`)
+    .join("") || `<tr><td colspan="7"><div class="empty">暂无项目经营数据</div></td></tr>`;
+  renderList("#report-actions", state.data.reportActions, (v) => `<div class="list-item"><div><strong>${v[0]}</strong><p>${v[1]}</p></div><button class="ghost mini" type="button" data-export="${v[2]}">导出</button></div>`);
   renderCustomers();
   renderContracts();
   renderSettlements();
@@ -555,6 +633,33 @@ async function submitForm(e) {
   renderAll();
 }
 
+async function exportReport(kind) {
+  const resp = await fetch(`${apiBase}/reports/export?kind=${encodeURIComponent(kind)}`, {
+    headers: {
+      ...authHeaders(),
+    },
+  });
+  if (resp.status === 401) {
+    logout(false);
+    throw new Error("登录已失效，请重新登录");
+  }
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(text || "导出失败");
+  }
+  const blob = await resp.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const disposition = resp.headers.get("Content-Disposition") || "";
+  const match = disposition.match(/filename="?([^"]+)"?/);
+  link.href = url;
+  link.download = match ? decodeURIComponent(match[1]) : `${kind}-report.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 async function removeItem(type, id) {
   const key = forms[type].key;
   await request(`/${key}/${id}`, { method: "DELETE" });
@@ -629,6 +734,8 @@ function bindEvents() {
   $("#login-form").addEventListener("submit", login);
   $("#entity-form").addEventListener("submit", submitForm);
   $("#close-form").addEventListener("click", closeForm);
+  $("#export-project-report").addEventListener("click", () => exportReport("project").catch((err) => alert(err.message)));
+  $("#export-settlement-report").addEventListener("click", () => exportReport("settlement").catch((err) => alert(err.message)));
   $("#alert-modal").addEventListener("click", (e) => {
     if (e.target.id === "alert-modal") $("#alert-modal").classList.add("hidden");
   });
@@ -639,9 +746,11 @@ function bindEvents() {
     const openBtn = e.target.closest("[data-open]");
     const editBtn = e.target.closest("[data-edit]");
     const delBtn = e.target.closest("[data-del]");
+    const exportBtn = e.target.closest("[data-export]");
     if (openBtn && canOpen(openBtn.dataset.open)) openForm(openBtn.dataset.open);
     if (editBtn && can(`${forms[editBtn.dataset.edit].key}:write`)) openForm(editBtn.dataset.edit, editBtn.dataset.id);
     if (delBtn && can(`${forms[delBtn.dataset.del].key}:write`)) removeItem(delBtn.dataset.del, delBtn.dataset.id);
+    if (exportBtn) exportReport(exportBtn.dataset.export).catch((err) => alert(err.message));
     if (e.target.id === "cancel-form") closeForm();
   });
 }

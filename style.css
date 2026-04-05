@@ -217,6 +217,10 @@ button.ghost {
   margin-bottom: 20px;
 }
 
+.compact-summary {
+  margin-bottom: 16px;
+}
+
 .metric,
 .card,
 .dispatch-item {

@@ -165,9 +165,43 @@
               <button type="button" data-open="customer">新增客户</button>
               <button type="button" data-open="contract">新增合同</button>
               <button type="button" data-open="settlement">新增结算单</button>
+              <button type="button" id="export-project-report" class="ghost">导出项目统计</button>
+              <button type="button" id="export-settlement-report" class="ghost">导出结算报表</button>
             </div>
           </div>
           <div class="summary-grid" id="finance-summary"></div>
+          <div class="grid two">
+            <section class="card">
+              <div class="card-head">
+                <h3>项目 / 订单经营统计</h3>
+                <span>项目归属、订单数与收入进度</span>
+              </div>
+              <div class="summary-grid compact-summary" id="project-summary"></div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>项目</th>
+                      <th>客户</th>
+                      <th>订单数</th>
+                      <th>合同额</th>
+                      <th>应收</th>
+                      <th>已收</th>
+                      <th>未收</th>
+                    </tr>
+                  </thead>
+                  <tbody id="project-rows"></tbody>
+                </table>
+              </div>
+            </section>
+            <section class="card">
+              <div class="card-head">
+                <h3>导出中心</h3>
+                <span>经营、客户与结算数据</span>
+              </div>
+              <div id="report-actions" class="list"></div>
+            </section>
+          </div>
           <div class="grid two">
             <section class="card">
               <div class="card-head">
