@@ -16,6 +16,7 @@ const state = {
       ["drivers", "驾驶员"],
       ["users", "账号管理"],
       ["dispatch", "调度中心"],
+      ["finance", "客户结算"],
       ["safety", "安全生产"],
       ["maintenance", "维保能源"],
     ],
@@ -38,16 +39,21 @@ const state = {
     drivers: [],
     users: [],
     dispatch: [],
+    customers: [],
+    contracts: [],
+    settlements: [],
     safety: [],
     maintenance: [],
     energy: [],
     safetyKpis: [],
+    financeSummary: [],
+    financeInsights: [],
   },
 };
 
 const roleMenus = {
-  管理员: ["dashboard", "vehicles", "drivers", "users", "dispatch", "safety", "maintenance"],
-  调度员: ["dashboard", "vehicles", "drivers", "dispatch"],
+  管理员: ["dashboard", "vehicles", "drivers", "users", "dispatch", "finance", "safety", "maintenance"],
+  调度员: ["dashboard", "vehicles", "drivers", "dispatch", "finance"],
   安全员: ["dashboard", "vehicles", "drivers", "safety"],
   机务员: ["dashboard", "vehicles", "maintenance"],
 };
@@ -98,10 +104,57 @@ const forms = {
     fields: [
       ["code", "派车单号", "text"],
       ["name", "任务名称", "text"],
+      ["customer", "所属客户", "text"],
+      ["project", "项目名称", "text"],
+      ["contractCode", "关联合同", "text"],
       ["priority", "优先级", "select", ["高优", "常规"]],
       ["progress", "派发进度", "text"],
+      ["settlementStatus", "结算状态", "select", ["待建账", "待回款", "部分回款", "已回款"]],
       ["owner", "负责人", "text"],
       ["note", "任务说明", "text", [], true],
+    ],
+  },
+  customer: {
+    title: "客户档案",
+    key: "customers",
+    fields: [
+      ["name", "客户名称", "text"],
+      ["category", "客户类型", "select", ["政府单位", "学校", "景区/酒店", "企业客户", "旅行社"]],
+      ["contact", "联系人", "text"],
+      ["phone", "联系电话", "text"],
+      ["creditLevel", "资信等级", "select", ["A", "B", "C"]],
+      ["status", "合作状态", "select", ["合作中", "跟进中", "暂停"]],
+      ["note", "备注", "text", [], true],
+    ],
+  },
+  contract: {
+    title: "合同台账",
+    key: "contracts",
+    fields: [
+      ["code", "合同编号", "text"],
+      ["customerName", "客户名称", "text"],
+      ["projectName", "项目名称", "text"],
+      ["amount", "合同金额", "number"],
+      ["startDate", "起始日期", "date"],
+      ["endDate", "结束日期", "date"],
+      ["status", "合同状态", "select", ["执行中", "待启动", "已到期", "已完成"]],
+      ["owner", "商务负责人", "text"],
+      ["note", "合同说明", "text", [], true],
+    ],
+  },
+  settlement: {
+    title: "结算单",
+    key: "settlements",
+    fields: [
+      ["code", "结算单号", "text"],
+      ["contractCode", "合同编号", "text"],
+      ["customerName", "客户名称", "text"],
+      ["projectName", "项目名称", "text"],
+      ["receivable", "应收金额", "number"],
+      ["received", "已收金额", "number"],
+      ["dueDate", "到期日期", "date"],
+      ["status", "回款状态", "select", ["待开票", "待回款", "部分回款", "已回款"]],
+      ["note", "结算说明", "text", [], true],
     ],
   },
   maintenance: {
@@ -184,6 +237,8 @@ async function request(path, options) {
 function syncDerived() {
   const d = state.data;
   const vehicles = d.vehicles;
+  const contracts = d.contracts;
+  const settlements = d.settlements;
   d.fleet = [
     ["运营中", `${vehicles.filter((v) => v.status === "运营中").length} 台`, "badge"],
     ["待命", `${vehicles.filter((v) => v.status === "待命").length} 台`, "badge"],
@@ -204,13 +259,49 @@ function syncDerived() {
     .filter((v) => v.status !== "已闭环")
     .slice(0, 2)
     .map((v) => [v.title, `${v.plate || "未关联车辆"} · ${v.status}`, v.level === "紧急" ? "danger" : "warn"]);
-  d.alerts = [...openSafety, ...soonVehicles, ...soonDrivers].slice(0, 4);
+  const overdueSettlements = settlements
+    .filter((v) => v.dueDate && v.status !== "已回款")
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+    .slice(0, 2)
+    .map((v) => [v.code, `${v.customerName} · 应收 ${Number(v.receivable || 0).toFixed(0)} 元，${v.dueDate} 到期`, "danger"]);
+  const endingContracts = contracts
+    .filter((v) => v.endDate && v.status !== "已完成")
+    .sort((a, b) => a.endDate.localeCompare(b.endDate))
+    .slice(0, 2)
+    .map((v) => [v.code, `${v.customerName} · 合同到期日 ${v.endDate}`, "warn"]);
+  d.alerts = [...overdueSettlements, ...openSafety, ...endingContracts, ...soonVehicles, ...soonDrivers].slice(0, 4);
   d.safetyKpis = [
     ["车辆合规率", "100%"],
     ["安全事件总数", String(d.safety.length)],
     ["待整改事件", String(d.safety.filter((v) => v.status === "待整改").length)],
     ["闭环率", d.safety.length ? `${Math.round((d.safety.filter((v) => v.status === "已闭环").length / d.safety.length) * 100)}%` : "100%"],
   ];
+  const contractAmount = contracts.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const receivable = settlements.reduce((sum, item) => sum + Number(item.receivable || 0), 0);
+  const received = settlements.reduce((sum, item) => sum + Number(item.received || 0), 0);
+  d.financeSummary = [
+    ["合作客户", String(d.customers.length), "有效客户档案数"],
+    ["合同总额", `${contractAmount.toFixed(0)} 元`, "累计合同台账"],
+    ["应收金额", `${receivable.toFixed(0)} 元`, "结算单累计"],
+    ["已回款", `${received.toFixed(0)} 元`, "已到账金额"],
+  ];
+  const customerMap = {};
+  contracts.forEach((item) => {
+    customerMap[item.customerName] = (customerMap[item.customerName] || 0) + Number(item.amount || 0);
+  });
+  const projectMap = {};
+  settlements.forEach((item) => {
+    projectMap[item.projectName] = (projectMap[item.projectName] || 0) + Number(item.receivable || 0);
+  });
+  const topCustomers = Object.keys(customerMap)
+    .sort((a, b) => customerMap[b] - customerMap[a])
+    .slice(0, 3)
+    .map((name) => [`客户 ${name}`, `${customerMap[name].toFixed(0)} 元`, "badge"]);
+  const topProjects = Object.keys(projectMap)
+    .sort((a, b) => projectMap[b] - projectMap[a])
+    .slice(0, 3)
+    .map((name) => [`项目 ${name}`, `${projectMap[name].toFixed(0)} 元`, "badge warn"]);
+  d.financeInsights = [...topCustomers, ...topProjects];
 }
 
 function renderMenu() {
@@ -229,6 +320,7 @@ function renderMetrics() {
     ["今日出车", String(d.vehicles.filter((v) => v.status === "运营中").length), "实时联动车辆状态"],
     ["安全事件", String(d.safety.length), "含待整改与闭环事项"],
     ["能源成本", `${d.energy.reduce((sum, item) => sum + Number(item.amount || 0), 0).toFixed(0)}`, "油电费用累计"],
+    ["待回款", `${(d.settlements.reduce((sum, item) => sum + Number(item.receivable || 0) - Number(item.received || 0), 0)).toFixed(0)}`, "客户结算余额"],
   ];
   $("#metrics").innerHTML = metrics
     .map(([label, value, tip]) => `<article class="metric"><span class="muted">${label}</span><strong>${value}</strong><small class="muted">${tip}</small></article>`)
@@ -276,7 +368,44 @@ function renderUsers() {
 
 function renderDispatch() {
   const q = state.q.trim();
-  $("#dispatch-cards").innerHTML = state.data.dispatch.filter((v) => !q || Object.values(v).join(" ").includes(q)).map((v) => `<article class="dispatch-item"><div><div class="list-item"><strong>${v.code}</strong><span class="${badgeClass(v.priority === "高优" ? "danger" : "ok")}">${v.priority}</span></div><p>${v.name}</p><p>${v.owner}</p><p>${v.note}</p></div><div><strong>${v.progress}</strong>${rowActions("dispatch", v.id)}</div></article>`).join("") || `<div class="empty">暂无符合条件的派车单</div>`;
+  $("#dispatch-cards").innerHTML = state.data.dispatch
+    .filter((v) => !q || Object.values(v).join(" ").includes(q))
+    .map((v) => `<article class="dispatch-item"><div><div class="list-item"><strong>${v.code}</strong><span class="${badgeClass(v.priority === "高优" ? "danger" : "ok")}">${v.priority}</span></div><p>${v.name}</p><p>${v.customer || "未绑定客户"} / ${v.project || "未命名项目"}</p><p>${v.owner}</p><p>${v.note}</p></div><div><strong>${v.progress}</strong><p>${v.contractCode || "未关联合同"} · ${v.settlementStatus || "待建账"}</p>${rowActions("dispatch", v.id)}</div></article>`)
+    .join("") || `<div class="empty">暂无符合条件的派车单</div>`;
+}
+
+function renderCustomers() {
+  const q = state.q.trim();
+  const rows = state.data.customers.filter((v) => !q || Object.values(v).join(" ").includes(q));
+  $("#customer-rows").innerHTML = rows
+    .map((v) => `<tr><td><div>${v.name}</div>${rowActions("customer", v.id)}</td><td>${v.category}</td><td>${v.contact}</td><td>${v.phone}</td><td><span class="badge">${v.creditLevel}</span></td><td>${v.status}</td></tr>`)
+    .join("") || `<tr><td colspan="6"><div class="empty">暂无客户档案</div></td></tr>`;
+}
+
+function renderContracts() {
+  const q = state.q.trim();
+  const rows = state.data.contracts.filter((v) => !q || Object.values(v).join(" ").includes(q));
+  $("#contract-rows").innerHTML = rows
+    .map((v) => `<tr><td><div>${v.code}</div>${rowActions("contract", v.id)}</td><td>${v.customerName}</td><td>${v.projectName}</td><td>${Number(v.amount || 0).toFixed(2)}</td><td><span class="${badgeClass(v.status === "执行中" ? "ok" : v.status === "已完成" ? "ok" : "warn")}">${v.status}</span></td><td>${v.startDate} 至 ${v.endDate}</td></tr>`)
+    .join("") || `<tr><td colspan="6"><div class="empty">暂无合同台账</div></td></tr>`;
+}
+
+function renderSettlements() {
+  const q = state.q.trim();
+  const rows = state.data.settlements.filter((v) => !q || Object.values(v).join(" ").includes(q));
+  $("#settlement-rows").innerHTML = rows
+    .map((v) => `<tr><td><div>${v.code}</div>${rowActions("settlement", v.id)}</td><td>${v.contractCode}</td><td>${v.customerName}</td><td>${v.projectName}</td><td>${Number(v.receivable || 0).toFixed(2)}</td><td>${Number(v.received || 0).toFixed(2)}</td><td><span class="${badgeClass(v.status === "已回款" ? "ok" : "warn")}">${v.status}</span></td><td>${v.dueDate}</td></tr>`)
+    .join("") || `<tr><td colspan="8"><div class="empty">暂无结算单</div></td></tr>`;
+}
+
+function renderFinance() {
+  $("#finance-summary").innerHTML = state.data.financeSummary
+    .map(([label, value, tip]) => `<article class="metric"><span class="muted">${label}</span><strong>${value}</strong><small class="muted">${tip}</small></article>`)
+    .join("");
+  renderList("#finance-insights", state.data.financeInsights, (v) => `<div class="list-item"><strong>${v[0]}</strong><span class="${v[2]}">${v[1]}</span></div>`);
+  renderCustomers();
+  renderContracts();
+  renderSettlements();
 }
 
 function renderSafety() {
@@ -325,17 +454,41 @@ function openForm(type, id) {
       const value = item && item[name] ? item[name] : "";
       const required = !(type === "user" && name === "password" && id);
       const reqAttr = required ? "required" : "";
+      const extraAttr = kind === "number" ? 'step="0.01"' : "";
       const control = kind === "select"
         ? `<select name="${name}" ${reqAttr}>${options.map((opt) => `<option value="${opt}" ${opt === value ? "selected" : ""}>${opt}</option>`).join("")}</select>`
-        : `<input name="${name}" type="${kind}" value="${name === "password" ? "" : value}" ${reqAttr} />`;
+        : `<input name="${name}" type="${kind}" value="${name === "password" ? "" : value}" ${reqAttr} ${extraAttr} />`;
       return `<div class="field ${full ? "full" : ""}"><label>${label}</label>${control}</div>`;
     })
     .join("") + `<div class="form-actions"><button class="ghost" id="cancel-form" type="button">取消</button><button type="submit">${id ? "保存修改" : "确认新增"}</button></div>`;
   $("#form-modal").classList.remove("hidden");
+  bindFormAssist(type);
 }
 
 function closeForm() {
   $("#form-modal").classList.add("hidden");
+}
+
+function bindFormAssist(type) {
+  const form = $("#entity-form");
+  if (!form) return;
+  const calcAmount = () => {
+    if (type === "energy") {
+      const volume = Number(form.elements.volume && form.elements.volume.value || 0);
+      const unitPrice = Number(form.elements.unitPrice && form.elements.unitPrice.value || 0);
+      if (form.elements.amount) form.elements.amount.value = volume && unitPrice ? (volume * unitPrice).toFixed(2) : "";
+    }
+    if (type === "settlement") {
+      const receivable = Number(form.elements.receivable && form.elements.receivable.value || 0);
+      const received = Number(form.elements.received && form.elements.received.value || 0);
+      const statusEl = form.elements.status;
+      if (!statusEl) return;
+      if (!received) statusEl.value = receivable ? "待回款" : statusEl.value;
+      else if (received >= receivable && receivable > 0) statusEl.value = "已回款";
+      else if (received > 0 && received < receivable) statusEl.value = "部分回款";
+    }
+  };
+  form.addEventListener("input", calcAmount);
 }
 
 function renderStaticLists() {
@@ -357,6 +510,7 @@ function renderAll() {
   renderDrivers();
   renderUsers();
   renderDispatch();
+  renderFinance();
 }
 
 async function loadBootstrap() {
@@ -365,6 +519,9 @@ async function loadBootstrap() {
   state.data.drivers = body.drivers || [];
   state.data.users = body.users || [];
   state.data.dispatch = body.dispatch || [];
+  state.data.customers = body.customers || [];
+  state.data.contracts = body.contracts || [];
+  state.data.settlements = body.settlements || [];
   state.data.safety = body.safety || [];
   state.data.maintenance = body.maintenance || [];
   state.data.energy = body.energy || [];
@@ -378,6 +535,11 @@ async function submitForm(e) {
   const payload = Object.fromEntries(new FormData(e.target).entries());
   if (payload.seats) payload.seats = Number(payload.seats);
   if (payload.score) payload.score = Number(payload.score);
+  if (payload.amount) payload.amount = Number(payload.amount);
+  if (payload.receivable) payload.receivable = Number(payload.receivable);
+  if (payload.received) payload.received = Number(payload.received);
+  if (payload.volume) payload.volume = Number(payload.volume);
+  if (payload.unitPrice) payload.unitPrice = Number(payload.unitPrice);
   if (state.formType === "user" && !payload.password) delete payload.password;
   const path = `/${key}${state.editId ? `/${state.editId}` : ""}`;
   const method = state.editId ? "PUT" : "POST";
@@ -434,7 +596,7 @@ async function login(e) {
     setLoggedIn(body.user);
     $("#login-tip").textContent = "登录成功，正在加载数据...";
     await loadBootstrap();
-    $("#login-tip").textContent = "可用账号：admin、dispatch、safety、maintenance；默认密码均为 admin123";
+    $("#login-tip").textContent = "可用账号：admin、dispatch、safety、maintenance；默认密码均为 admin123，测试账号 opsdemo / demo123";
     e.target.reset();
   } catch (err) {
     $("#login-tip").textContent = err.message;
@@ -452,6 +614,7 @@ function bindEvents() {
     renderDrivers();
     renderUsers();
     renderDispatch();
+    renderFinance();
     renderSafety();
     renderMaintenance();
     renderEnergy();
@@ -489,7 +652,7 @@ function init() {
   switchPanel("dashboard");
   bindEvents();
   tryResume().catch(() => {
-    $("#login-tip").textContent = "可用账号：admin、dispatch、safety、maintenance；默认密码均为 admin123";
+    $("#login-tip").textContent = "可用账号：admin、dispatch、safety、maintenance；默认密码均为 admin123，测试账号 opsdemo / demo123";
   });
 }
 

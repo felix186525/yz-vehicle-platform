@@ -158,6 +158,94 @@
           <div id="dispatch-cards" class="dispatch-grid"></div>
         </section>
 
+        <section class="panel" data-panel="finance">
+          <div class="section-head">
+            <h3>客户合同与结算</h3>
+            <div class="row-actions">
+              <button type="button" data-open="customer">新增客户</button>
+              <button type="button" data-open="contract">新增合同</button>
+              <button type="button" data-open="settlement">新增结算单</button>
+            </div>
+          </div>
+          <div class="summary-grid" id="finance-summary"></div>
+          <div class="grid two">
+            <section class="card">
+              <div class="card-head">
+                <h3>客户档案</h3>
+                <span>重点合作单位与资信等级</span>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>客户名称</th>
+                      <th>类型</th>
+                      <th>联系人</th>
+                      <th>电话</th>
+                      <th>资信</th>
+                      <th>状态</th>
+                    </tr>
+                  </thead>
+                  <tbody id="customer-rows"></tbody>
+                </table>
+              </div>
+            </section>
+            <section class="card">
+              <div class="card-head">
+                <h3>经营统计</h3>
+                <span>按客户 / 项目汇总</span>
+              </div>
+              <div id="finance-insights" class="list"></div>
+            </section>
+          </div>
+          <div class="grid two">
+            <section class="card">
+              <div class="card-head">
+                <h3>合同台账</h3>
+                <span>履约与到期跟踪</span>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>合同编号</th>
+                      <th>客户</th>
+                      <th>项目</th>
+                      <th>合同金额</th>
+                      <th>状态</th>
+                      <th>周期</th>
+                    </tr>
+                  </thead>
+                  <tbody id="contract-rows"></tbody>
+                </table>
+              </div>
+            </section>
+            <section class="card">
+              <div class="card-head">
+                <h3>结算与回款</h3>
+                <span>应收、已收与到期</span>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>结算单号</th>
+                      <th>合同编号</th>
+                      <th>客户</th>
+                      <th>项目</th>
+                      <th>应收</th>
+                      <th>已收</th>
+                      <th>状态</th>
+                      <th>到期日</th>
+                    </tr>
+                  </thead>
+                  <tbody id="settlement-rows"></tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        </section>
+
         <section class="panel" data-panel="safety">
           <div class="section-head">
             <h3>安全生产</h3>
@@ -245,7 +333,7 @@
             <input name="password" type="password" placeholder="admin123" required />
           </div>
           <div class="field full">
-            <p class="auth-tip" id="login-tip">可用账号：admin、dispatch、safety、maintenance；默认密码均为 admin123</p>
+            <p class="auth-tip" id="login-tip">可用账号：admin、dispatch、safety、maintenance；默认密码均为 admin123，测试账号 opsdemo / demo123</p>
           </div>
           <div class="form-actions">
             <button type="submit">登录系统</button>

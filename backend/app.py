@@ -17,15 +17,18 @@ HOST = os.environ.get("YZ_HOST", "127.0.0.1")
 PORT = int(os.environ.get("YZ_PORT", "9001"))
 sessions = {}
 ROLE_PERMS = {
-    "管理员": ["users:write", "vehicles:write", "drivers:write", "dispatch:write", "maintenance:write", "safety:write", "energy:write"],
-    "调度员": ["dispatch:write"],
+    "管理员": ["users:write", "vehicles:write", "drivers:write", "dispatch:write", "customers:write", "contracts:write", "settlements:write", "maintenance:write", "safety:write", "energy:write"],
+    "调度员": ["dispatch:write", "customers:write", "contracts:write", "settlements:write"],
     "安全员": ["safety:write"],
     "机务员": ["maintenance:write", "vehicles:write", "energy:write"],
 }
 TABLE_FIELDS = {
     "vehicles": ["plate", "model", "seats", "status", "biz", "annual", "insurance", "task"],
     "drivers": ["name", "license", "years", "score", "shift", "expiry", "mental"],
-    "dispatch": ["code", "name", "priority", "progress", "owner", "note"],
+    "dispatch": ["code", "name", "customer", "project", "contractCode", "priority", "progress", "settlementStatus", "owner", "note"],
+    "customers": ["name", "category", "contact", "phone", "creditLevel", "status", "note"],
+    "contracts": ["code", "customerName", "projectName", "amount", "startDate", "endDate", "status", "owner", "note"],
+    "settlements": ["code", "contractCode", "customerName", "projectName", "receivable", "received", "dueDate", "status", "note"],
     "maintenance": ["code", "plate", "kind", "status", "planDate", "note"],
     "energy": ["plate", "energyType", "volume", "unitPrice", "amount", "date", "note"],
     "safety": ["title", "plate", "level", "status", "date", "detail"],
@@ -34,12 +37,15 @@ TABLE_PREFIX = {
     "vehicles": "v",
     "drivers": "d",
     "dispatch": "t",
+    "customers": "c",
+    "contracts": "h",
+    "settlements": "r",
     "maintenance": "m",
     "energy": "e",
     "safety": "s",
 }
 INT_FIELDS = {"seats", "score"}
-FLOAT_FIELDS = {"volume", "unitPrice", "amount"}
+FLOAT_FIELDS = {"volume", "unitPrice", "amount", "receivable", "received"}
 
 
 def now():
@@ -89,6 +95,12 @@ def insert_row(conn, table, item):
     conn.execute(sql, values)
 
 
+def ensure_column(conn, table, column, definition):
+    columns = [row["name"] for row in conn.execute("pragma table_info({0})".format(table)).fetchall()]
+    if column not in columns:
+        conn.execute("alter table {0} add column {1} {2}".format(table, column, definition))
+
+
 def init_db():
     if not os.path.isdir(DATA_DIR):
         os.makedirs(DATA_DIR)
@@ -132,9 +144,53 @@ def init_db():
             id text primary key,
             code text not null,
             name text not null,
+            customer text not null,
+            project text not null,
+            contractCode text not null,
             priority text not null,
             progress text not null,
+            settlementStatus text not null,
             owner text not null,
+            note text not null,
+            created_at text not null,
+            updated_at text not null
+        );
+        create table if not exists customers (
+            id text primary key,
+            name text not null,
+            category text not null,
+            contact text not null,
+            phone text not null,
+            creditLevel text not null,
+            status text not null,
+            note text not null,
+            created_at text not null,
+            updated_at text not null
+        );
+        create table if not exists contracts (
+            id text primary key,
+            code text not null,
+            customerName text not null,
+            projectName text not null,
+            amount real not null,
+            startDate text not null,
+            endDate text not null,
+            status text not null,
+            owner text not null,
+            note text not null,
+            created_at text not null,
+            updated_at text not null
+        );
+        create table if not exists settlements (
+            id text primary key,
+            code text not null,
+            contractCode text not null,
+            customerName text not null,
+            projectName text not null,
+            receivable real not null,
+            received real not null,
+            dueDate text not null,
+            status text not null,
             note text not null,
             created_at text not null,
             updated_at text not null
@@ -175,11 +231,16 @@ def init_db():
         );
         """
     )
+    ensure_column(conn, "dispatch", "customer", "text not null default ''")
+    ensure_column(conn, "dispatch", "project", "text not null default ''")
+    ensure_column(conn, "dispatch", "contractCode", "text not null default ''")
+    ensure_column(conn, "dispatch", "settlementStatus", "text not null default '待建账'")
     users = [
         ("u1", "admin", hash_password("admin123"), "系统管理员", "管理员"),
         ("u2", "dispatch", hash_password("admin123"), "调度员账号", "调度员"),
         ("u3", "safety", hash_password("admin123"), "安全员账号", "安全员"),
         ("u4", "maintenance", hash_password("admin123"), "机务员账号", "机务员"),
+        ("u5", "opsdemo", hash_password("demo123"), "经营演示账号", "调度员"),
     ]
     for user in users:
         cur.execute("insert or ignore into users values (?, ?, ?, ?, ?)", user)
@@ -200,10 +261,28 @@ def init_db():
             {"id": "d5", "name": "赵立新", "license": "A1", "years": "15 年", "score": 97, "shift": "赛事保障后备", "expiry": "2026-06-30", "mental": "稳定"},
         ],
         "dispatch": [
-            {"id": "t1", "code": "DY20260402001", "name": "枣林湾音乐节返程", "priority": "高优", "progress": "已派 88/88 台", "owner": "负责人：吴调度", "note": "南京南站、扬州东站、仪征停车场三线并发。"},
-            {"id": "t2", "code": "DY20260402008", "name": "梅岭中学早晚班", "priority": "常规", "progress": "已派 12/12 台", "owner": "负责人：张队长", "note": "固定线路、固定司机、跟车老师实名登记。"},
-            {"id": "t3", "code": "DY20260402012", "name": "禄口机场接驳", "priority": "常规", "progress": "已派 16/18 台", "owner": "负责人：陈班长", "note": "候机楼班次剩余 2 台待确认。"},
-            {"id": "t4", "code": "DY20260402018", "name": "市级机关会议用车", "priority": "高优", "progress": "已派 6/6 台", "owner": "负责人：周主任", "note": "考斯特与商务车组合保障。"},
+            {"id": "t1", "code": "DY20260402001", "name": "枣林湾音乐节返程", "customer": "仪征文旅集团", "project": "音乐节接驳保障", "contractCode": "HT2026-001", "priority": "高优", "progress": "已派 88/88 台", "settlementStatus": "待回款", "owner": "负责人：吴调度", "note": "南京南站、扬州东站、仪征停车场三线并发。"},
+            {"id": "t2", "code": "DY20260402008", "name": "梅岭中学早晚班", "customer": "梅岭中学", "project": "校车通勤服务", "contractCode": "HT2026-002", "priority": "常规", "progress": "已派 12/12 台", "settlementStatus": "部分回款", "owner": "负责人：张队长", "note": "固定线路、固定司机、跟车老师实名登记。"},
+            {"id": "t3", "code": "DY20260402012", "name": "禄口机场接驳", "customer": "扬州空港服务公司", "project": "机场接驳年度项目", "contractCode": "HT2026-003", "priority": "常规", "progress": "已派 16/18 台", "settlementStatus": "待回款", "owner": "负责人：陈班长", "note": "候机楼班次剩余 2 台待确认。"},
+            {"id": "t4", "code": "DY20260402018", "name": "市级机关会议用车", "customer": "扬州市机关事务管理局", "project": "政务会议交通保障", "contractCode": "HT2026-004", "priority": "高优", "progress": "已派 6/6 台", "settlementStatus": "已回款", "owner": "负责人：周主任", "note": "考斯特与商务车组合保障。"},
+        ],
+        "customers": [
+            {"id": "c1", "name": "仪征文旅集团", "category": "景区/酒店", "contact": "周敏", "phone": "13851001201", "creditLevel": "A", "status": "合作中", "note": "大型活动摆渡核心客户"},
+            {"id": "c2", "name": "梅岭中学", "category": "学校", "contact": "刘老师", "phone": "13851001202", "creditLevel": "A", "status": "合作中", "note": "校车年度服务单位"},
+            {"id": "c3", "name": "扬州空港服务公司", "category": "企业客户", "contact": "郑经理", "phone": "13851001203", "creditLevel": "B", "status": "合作中", "note": "机场接驳与地面联运"},
+            {"id": "c4", "name": "扬州市机关事务管理局", "category": "政府单位", "contact": "顾主任", "phone": "13851001204", "creditLevel": "A", "status": "合作中", "note": "会议与公务接待保障"},
+        ],
+        "contracts": [
+            {"id": "h1", "code": "HT2026-001", "customerName": "仪征文旅集团", "projectName": "音乐节接驳保障", "amount": 480000, "startDate": "2026-03-20", "endDate": "2026-04-30", "status": "执行中", "owner": "商务：蒋雯", "note": "按活动波次结算"},
+            {"id": "h2", "code": "HT2026-002", "customerName": "梅岭中学", "projectName": "校车通勤服务", "amount": 920000, "startDate": "2026-02-15", "endDate": "2026-12-31", "status": "执行中", "owner": "商务：王蓉", "note": "按月结算，含跟车管理"},
+            {"id": "h3", "code": "HT2026-003", "customerName": "扬州空港服务公司", "projectName": "机场接驳年度项目", "amount": 650000, "startDate": "2026-01-01", "endDate": "2026-12-31", "status": "执行中", "owner": "商务：唐悦", "note": "接驳班次浮动计费"},
+            {"id": "h4", "code": "HT2026-004", "customerName": "扬州市机关事务管理局", "projectName": "政务会议交通保障", "amount": 220000, "startDate": "2026-03-01", "endDate": "2026-06-30", "status": "执行中", "owner": "商务：程浩", "note": "专项保障项目"},
+        ],
+        "settlements": [
+            {"id": "r1", "code": "JS2026-001", "contractCode": "HT2026-001", "customerName": "仪征文旅集团", "projectName": "音乐节接驳保障", "receivable": 180000, "received": 60000, "dueDate": "2026-04-10", "status": "待回款", "note": "首期活动结算"},
+            {"id": "r2", "code": "JS2026-002", "contractCode": "HT2026-002", "customerName": "梅岭中学", "projectName": "校车通勤服务", "receivable": 160000, "received": 80000, "dueDate": "2026-04-15", "status": "部分回款", "note": "三月校车月结"},
+            {"id": "r3", "code": "JS2026-003", "contractCode": "HT2026-003", "customerName": "扬州空港服务公司", "projectName": "机场接驳年度项目", "receivable": 120000, "received": 0, "dueDate": "2026-04-12", "status": "待回款", "note": "季度首单"},
+            {"id": "r4", "code": "JS2026-004", "contractCode": "HT2026-004", "customerName": "扬州市机关事务管理局", "projectName": "政务会议交通保障", "receivable": 90000, "received": 90000, "dueDate": "2026-03-28", "status": "已回款", "note": "首批会议服务已结清"},
         ],
         "maintenance": [
             {"id": "m1", "code": "WB2026040203", "plate": "苏KD7781", "kind": "二级保养", "status": "进行中", "planDate": "2026-04-03", "note": "更换滤芯并检查轮胎磨损"},
