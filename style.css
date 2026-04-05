@@ -229,6 +229,13 @@ button.ghost {
   width: 100%;
 }
 
+.quick-ranges {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
 .date-range .field {
   min-width: 180px;
 }

@@ -246,6 +246,54 @@ function dispatchDate(item) {
   return `${match[1]}-${match[2]}-${match[3]}`;
 }
 
+function formatDateValue(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function rangeValues(kind) {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+
+  if (kind === "this-month") {
+    const start = new Date(year, month, 1);
+    const end = new Date(year, month + 1, 0);
+    return [formatDateValue(start), formatDateValue(end)];
+  }
+
+  if (kind === "last-month") {
+    const start = new Date(year, month - 1, 1);
+    const end = new Date(year, month, 0);
+    return [formatDateValue(start), formatDateValue(end)];
+  }
+
+  if (kind === "this-quarter") {
+    const quarterStartMonth = Math.floor(month / 3) * 3;
+    const start = new Date(year, quarterStartMonth, 1);
+    const end = new Date(year, quarterStartMonth + 3, 0);
+    return [formatDateValue(start), formatDateValue(end)];
+  }
+
+  if (kind === "this-year") {
+    const start = new Date(year, 0, 1);
+    const end = new Date(year, 11, 31);
+    return [formatDateValue(start), formatDateValue(end)];
+  }
+
+  return ["", ""];
+}
+
+function applyFinanceRange(start, end) {
+  state.financeStart = start;
+  state.financeEnd = end;
+  $("#finance-start").value = start;
+  $("#finance-end").value = end;
+  renderAll();
+}
+
 async function request(path, options) {
   const resp = await fetch(`${apiBase}${path}`, {
     ...options,
@@ -765,16 +813,16 @@ function bindEvents() {
   $("#export-project-report").addEventListener("click", () => exportReport("project").catch((err) => alert(err.message)));
   $("#export-settlement-report").addEventListener("click", () => exportReport("settlement").catch((err) => alert(err.message)));
   $("#finance-apply").addEventListener("click", () => {
-    state.financeStart = $("#finance-start").value;
-    state.financeEnd = $("#finance-end").value;
-    renderAll();
+    applyFinanceRange($("#finance-start").value, $("#finance-end").value);
   });
   $("#finance-reset").addEventListener("click", () => {
-    state.financeStart = "";
-    state.financeEnd = "";
-    $("#finance-start").value = "";
-    $("#finance-end").value = "";
-    renderAll();
+    applyFinanceRange("", "");
+  });
+  $$("[data-range]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const [start, end] = rangeValues(btn.dataset.range);
+      applyFinanceRange(start, end);
+    });
   });
   $("#alert-modal").addEventListener("click", (e) => {
     if (e.target.id === "alert-modal") $("#alert-modal").classList.add("hidden");
