@@ -40,12 +40,8 @@ const state = {
     dispatch: [],
     safety: [],
     maintenance: [],
+    energy: [],
     safetyKpis: [],
-    energy: [
-      ["苏KA1208", "百公里油耗 23.6L", "较均值 +3.2%，需复核。"],
-      ["苏KD7781", "百公里电耗 116kWh", "维保后复测。"],
-      ["苏KC6621", "月均成本 1.26 万", "校车线路稳定。"],
-    ],
   },
 };
 
@@ -118,6 +114,19 @@ const forms = {
       ["status", "工单状态", "select", ["待进厂", "进行中", "已完成"]],
       ["planDate", "计划完成", "date"],
       ["note", "工单说明", "text", [], true],
+    ],
+  },
+  energy: {
+    title: "能耗记录",
+    key: "energy",
+    fields: [
+      ["plate", "车牌", "text"],
+      ["energyType", "能耗类型", "select", ["燃油", "充电"]],
+      ["volume", "数量", "number"],
+      ["unitPrice", "单价", "number"],
+      ["amount", "总金额", "number"],
+      ["date", "发生日期", "date"],
+      ["note", "备注", "text", [], true],
     ],
   },
   safety: {
@@ -219,7 +228,7 @@ function renderMetrics() {
     ["在册车辆", String(d.vehicles.length), "实时联动车辆档案"],
     ["今日出车", String(d.vehicles.filter((v) => v.status === "运营中").length), "实时联动车辆状态"],
     ["安全事件", String(d.safety.length), "含待整改与闭环事项"],
-    ["维保工单", String(d.maintenance.length), "实时联动维保记录"],
+    ["能源成本", `${d.energy.reduce((sum, item) => sum + Number(item.amount || 0), 0).toFixed(0)}`, "油电费用累计"],
   ];
   $("#metrics").innerHTML = metrics
     .map(([label, value, tip]) => `<article class="metric"><span class="muted">${label}</span><strong>${value}</strong><small class="muted">${tip}</small></article>`)
@@ -283,6 +292,14 @@ function renderMaintenance() {
   $("#maintenance-list").innerHTML = rows.map((v) => `<div class="list-item"><div><strong>${v.code} / ${v.plate}</strong><p>${v.kind} · ${v.note}</p></div><div><span class="${badgeClass(v.status === "进行中" ? "warn" : "ok")}">${v.status}</span><p>${v.planDate}</p>${rowActions("maintenance", v.id)}</div></div>`).join("") || `<div class="empty">暂无维保工单</div>`;
 }
 
+function renderEnergy() {
+  const q = state.q.trim();
+  const rows = state.data.energy.filter((v) => !q || Object.values(v).join(" ").includes(q));
+  $("#energy-list").innerHTML = rows
+    .map((v) => `<div class="list-item"><div><strong>${v.plate}</strong><p>${v.energyType} ${v.volume} · ${v.date}</p></div><div><span class="badge">${Number(v.amount || 0).toFixed(2)} 元</span><p class="muted">${v.note || "无备注"}</p>${rowActions("energy", v.id)}</div></div>`)
+    .join("") || `<div class="empty">暂无能耗记录</div>`;
+}
+
 function switchPanel(id) {
   state.panel = id;
   renderMenu();
@@ -327,7 +344,7 @@ function renderStaticLists() {
   renderList("#event-timeline", state.data.eventTimeline, (v) => `<div class="timeline-item"><strong>${v[0]}</strong><p>${v[1]}</p></div>`);
   renderList("#fleet-status", state.data.fleet, (v) => `<div class="list-item"><strong>${v[0]}</strong><span class="${v[2]}">${v[1]}</span></div>`);
   renderMaintenance();
-  renderList("#energy-list", state.data.energy, (v) => `<div class="list-item"><div><strong>${v[0]}</strong><p>${v[1]}</p></div><span class="muted">${v[2]}</span></div>`);
+  renderEnergy();
   renderSafety();
 }
 
@@ -350,6 +367,7 @@ async function loadBootstrap() {
   state.data.dispatch = body.dispatch || [];
   state.data.safety = body.safety || [];
   state.data.maintenance = body.maintenance || [];
+  state.data.energy = body.energy || [];
   renderAll();
 }
 
@@ -436,6 +454,7 @@ function bindEvents() {
     renderDispatch();
     renderSafety();
     renderMaintenance();
+    renderEnergy();
   });
   $("#vehicle-filter").addEventListener("change", (e) => {
     state.vehicleStatus = e.target.value;

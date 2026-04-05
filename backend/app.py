@@ -17,16 +17,17 @@ HOST = os.environ.get("YZ_HOST", "127.0.0.1")
 PORT = int(os.environ.get("YZ_PORT", "9001"))
 sessions = {}
 ROLE_PERMS = {
-    "管理员": ["users:write", "vehicles:write", "drivers:write", "dispatch:write", "maintenance:write", "safety:write"],
+    "管理员": ["users:write", "vehicles:write", "drivers:write", "dispatch:write", "maintenance:write", "safety:write", "energy:write"],
     "调度员": ["dispatch:write"],
     "安全员": ["safety:write"],
-    "机务员": ["maintenance:write", "vehicles:write"],
+    "机务员": ["maintenance:write", "vehicles:write", "energy:write"],
 }
 TABLE_FIELDS = {
     "vehicles": ["plate", "model", "seats", "status", "biz", "annual", "insurance", "task"],
     "drivers": ["name", "license", "years", "score", "shift", "expiry", "mental"],
     "dispatch": ["code", "name", "priority", "progress", "owner", "note"],
     "maintenance": ["code", "plate", "kind", "status", "planDate", "note"],
+    "energy": ["plate", "energyType", "volume", "unitPrice", "amount", "date", "note"],
     "safety": ["title", "plate", "level", "status", "date", "detail"],
 }
 TABLE_PREFIX = {
@@ -34,9 +35,11 @@ TABLE_PREFIX = {
     "drivers": "d",
     "dispatch": "t",
     "maintenance": "m",
+    "energy": "e",
     "safety": "s",
 }
 INT_FIELDS = {"seats", "score"}
+FLOAT_FIELDS = {"volume", "unitPrice", "amount"}
 
 
 def now():
@@ -73,6 +76,8 @@ def item_from_payload(table, payload, item_id):
         value = payload.get(field, "")
         if field in INT_FIELDS:
             value = int(value or 0)
+        if field in FLOAT_FIELDS:
+            value = float(value or 0)
         item[field] = value
     return item
 
@@ -145,6 +150,18 @@ def init_db():
             created_at text not null,
             updated_at text not null
         );
+        create table if not exists energy (
+            id text primary key,
+            plate text not null,
+            energyType text not null,
+            volume real not null,
+            unitPrice real not null,
+            amount real not null,
+            date text not null,
+            note text not null,
+            created_at text not null,
+            updated_at text not null
+        );
         create table if not exists safety (
             id text primary key,
             title text not null,
@@ -192,6 +209,11 @@ def init_db():
             {"id": "m1", "code": "WB2026040203", "plate": "苏KD7781", "kind": "二级保养", "status": "进行中", "planDate": "2026-04-03", "note": "更换滤芯并检查轮胎磨损"},
             {"id": "m2", "code": "WB2026040207", "plate": "苏KB5102", "kind": "故障维修", "status": "待进厂", "planDate": "2026-04-04", "note": "空调系统检修"},
             {"id": "m3", "code": "WB2026040210", "plate": "苏KE3325", "kind": "例检", "status": "已完成", "planDate": "2026-04-01", "note": "季度例检已完成"},
+        ],
+        "energy": [
+            {"id": "e1", "plate": "苏KA1208", "energyType": "燃油", "volume": 180, "unitPrice": 7.45, "amount": 1341, "date": "2026-04-01", "note": "音乐节保障补油"},
+            {"id": "e2", "plate": "苏KD7781", "energyType": "充电", "volume": 116, "unitPrice": 1.08, "amount": 125.28, "date": "2026-04-02", "note": "维保后补电"},
+            {"id": "e3", "plate": "苏KC6621", "energyType": "燃油", "volume": 95, "unitPrice": 7.32, "amount": 695.4, "date": "2026-04-02", "note": "校车日常运营"},
         ],
         "safety": [
             {"id": "s1", "title": "超速预警", "plate": "苏KA1208", "level": "一般", "status": "整改中", "date": "2026-04-01", "detail": "昨日下午 16:42 触发 1 次超速报警，已安排谈话教育。"},
