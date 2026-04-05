@@ -46,6 +46,12 @@ TABLE_PREFIX = {
 }
 INT_FIELDS = {"seats", "score"}
 FLOAT_FIELDS = {"volume", "unitPrice", "amount", "receivable", "received"}
+DISPATCH_PROJECT_ALIASES = {
+    "枣林湾音乐节返程": "音乐节接驳保障",
+    "梅岭中学早晚班": "校车通勤服务",
+    "禄口机场接驳": "机场接驳年度项目",
+    "市级机关会议用车": "政务会议交通保障",
+}
 
 
 def now():
@@ -169,6 +175,62 @@ def ensure_column(conn, table, column, definition):
     columns = [row["name"] for row in conn.execute("pragma table_info({0})".format(table)).fetchall()]
     if column not in columns:
         conn.execute("alter table {0} add column {1} {2}".format(table, column, definition))
+
+
+def settlement_status(item):
+    receivable = float(item.get("receivable") or 0)
+    received = float(item.get("received") or 0)
+    if receivable > 0 and received >= receivable:
+        return "已回款"
+    if received > 0:
+        return "部分回款"
+    if receivable > 0:
+        return "待回款"
+    return "待建账"
+
+
+def backfill_dispatch_links(conn):
+    contracts = table_rows(conn, "contracts")
+    settlements = table_rows(conn, "settlements")
+    dispatch_rows = table_rows(conn, "dispatch")
+    if not dispatch_rows:
+        return
+
+    contract_by_project = {}
+    for item in contracts:
+        contract_by_project[item.get("projectName")] = item
+
+    settlement_by_contract = {}
+    for item in settlements:
+        contract_code = item.get("contractCode")
+        if contract_code and contract_code not in settlement_by_contract:
+            settlement_by_contract[contract_code] = item
+
+    for item in dispatch_rows:
+        project_name = item.get("project") or DISPATCH_PROJECT_ALIASES.get(item.get("name"), "")
+        contract = contract_by_project.get(project_name) if project_name else None
+        customer_name = item.get("customer") or (contract.get("customerName") if contract else "")
+        contract_code = item.get("contractCode") or (contract.get("code") if contract else "")
+        status = item.get("settlementStatus") or "待建账"
+        settlement = settlement_by_contract.get(contract_code) if contract_code else None
+        if settlement:
+            status = settlement_status(settlement)
+        elif status == "待建账" and contract_code:
+            status = "待回款"
+
+        should_update = (
+            item.get("project") != project_name
+            or item.get("customer") != customer_name
+            or item.get("contractCode") != contract_code
+            or item.get("settlementStatus") != status
+        )
+        if not should_update:
+            continue
+
+        conn.execute(
+            "update dispatch set project = ?, customer = ?, contractCode = ?, settlementStatus = ?, updated_at = ? where id = ?",
+            (project_name, customer_name, contract_code, status, now(), item["id"]),
+        )
 
 
 def init_db():
@@ -374,6 +436,7 @@ def init_db():
         if cur.execute("select count(*) from {0}".format(table)).fetchone()[0] == 0:
             for item in items:
                 insert_row(conn, table, item)
+    backfill_dispatch_links(conn)
     conn.commit()
     conn.close()
 
