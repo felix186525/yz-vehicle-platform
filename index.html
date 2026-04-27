@@ -169,7 +169,7 @@
               <button type="button" id="export-settlement-report" class="ghost">导出结算报表</button>
             </div>
           </div>
-          <div class="toolbar">
+          <div class="toolbar finance-toolbar">
             <div class="date-range">
               <div class="quick-ranges">
                 <button type="button" class="ghost mini" data-range="this-month">本月</button>
@@ -184,6 +184,28 @@
               <div class="field">
                 <label for="finance-end">结束日期</label>
                 <input id="finance-end" type="date" />
+              </div>
+              <div class="field finance-filter-field">
+                <label for="finance-status-filter">回款状态</label>
+                <select id="finance-status-filter">
+                  <option value="all">全部状态</option>
+                  <option value="overdue">仅看逾期</option>
+                  <option value="待回款">待回款</option>
+                  <option value="部分回款">部分回款</option>
+                  <option value="已回款">已回款</option>
+                </select>
+              </div>
+              <div class="field finance-filter-field">
+                <label for="finance-customer-filter">客户筛选</label>
+                <select id="finance-customer-filter">
+                  <option value="all">全部客户</option>
+                </select>
+              </div>
+              <div class="field finance-filter-field">
+                <label for="finance-contract-filter">合同筛选</label>
+                <select id="finance-contract-filter">
+                  <option value="all">全部合同</option>
+                </select>
               </div>
               <button type="button" id="finance-apply" class="ghost">应用筛选</button>
               <button type="button" id="finance-reset" class="ghost">重置</button>
@@ -222,6 +244,29 @@
               <div id="report-actions" class="list"></div>
             </section>
           </div>
+          <section class="card">
+            <div class="card-head">
+              <h3>待回款跟踪</h3>
+              <span>按到期时间排序，便于财务催收</span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>结算单号</th>
+                    <th>客户</th>
+                    <th>项目</th>
+                    <th>应收</th>
+                    <th>已收</th>
+                    <th>未收</th>
+                    <th>到期日</th>
+                    <th>状态</th>
+                  </tr>
+                </thead>
+                <tbody id="finance-overdue-rows"></tbody>
+              </table>
+            </div>
+          </section>
           <div class="grid two">
             <section class="card">
               <div class="card-head">

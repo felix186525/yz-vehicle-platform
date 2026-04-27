@@ -7,6 +7,10 @@ const state = {
   vehicleStatus: "all",
   financeStart: "",
   financeEnd: "",
+  financePreset: "",
+  financeStatus: "all",
+  financeCustomer: "all",
+  financeContract: "all",
   formType: "",
   editId: "",
   token: localStorage.getItem(tokenKey) || "",
@@ -22,6 +26,12 @@ const state = {
       ["safety", "安全生产"],
       ["maintenance", "维保能源"],
     ],
+    financeMeta: {
+      customerCount: 0,
+      projectCount: 0,
+      contractCount: 0,
+      overdueSettlementCount: 0,
+    },
     biz: [
       ["旅游包车", 38],
       ["校车运营", 24],
@@ -291,7 +301,14 @@ function applyFinanceRange(start, end) {
   state.financeEnd = end;
   $("#finance-start").value = start;
   $("#finance-end").value = end;
+  syncRangeButtons();
   renderAll();
+}
+
+function syncRangeButtons() {
+  $$("[data-range]").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.range === state.financePreset);
+  });
 }
 
 async function request(path, options) {
@@ -316,6 +333,18 @@ async function request(path, options) {
 function syncDerived() {
   const d = state.data;
   const vehicles = d.vehicles;
+  d.contracts = d.contracts.map((item) => {
+    const today = formatDateValue(new Date());
+    const status = item.endDate && item.endDate < today ? "已到期" : (item.status || "待启动");
+    return { ...item, status };
+  });
+  d.settlements = d.settlements.map((item) => {
+    const receivable = Number(item.receivable || 0);
+    const received = Number(item.received || 0);
+    const status = receivable > 0 && received >= receivable ? "已回款" : received > 0 ? "部分回款" : receivable > 0 ? "待回款" : "待建账";
+    const overdueLevel = !item.dueDate || status === "已回款" ? "ok" : item.dueDate < formatDateValue(new Date()) ? "danger" : "warn";
+    return { ...item, status, unreceived: receivable - received, overdueLevel };
+  });
   const contracts = d.contracts.filter((v) => inSpanRange(v.startDate, v.endDate, state.financeStart, state.financeEnd));
   const settlements = d.settlements.filter((v) => inDateRange(v.dueDate, state.financeStart, state.financeEnd));
   const dispatchList = d.dispatch.filter((v) => inDateRange(dispatchDate(v), state.financeStart, state.financeEnd));
@@ -360,10 +389,10 @@ function syncDerived() {
   const receivable = settlements.reduce((sum, item) => sum + Number(item.receivable || 0), 0);
   const received = settlements.reduce((sum, item) => sum + Number(item.received || 0), 0);
   d.financeSummary = [
-    ["合作客户", String(d.customers.length), "有效客户档案数"],
-    ["合同总额", `${contractAmount.toFixed(0)} 元`, "累计合同台账"],
+    ["合作客户", String(d.financeMeta.customerCount || d.customers.length), "有效客户档案数"],
+    ["合同总额", `${contractAmount.toFixed(0)} 元`, `累计合同 ${d.financeMeta.contractCount || contracts.length} 份`],
     ["应收金额", `${receivable.toFixed(0)} 元`, "结算单累计"],
-    ["已回款", `${received.toFixed(0)} 元`, "已到账金额"],
+    ["已回款", `${received.toFixed(0)} 元`, `逾期 ${d.financeMeta.overdueSettlementCount || settlements.filter((v) => v.overdueLevel === "danger").length} 笔`],
   ];
   const customerMap = {};
   contracts.forEach((item) => {
@@ -435,7 +464,7 @@ function syncDerived() {
     }))
     .sort((a, b) => b.receivable - a.receivable || b.contractAmount - a.contractAmount);
   d.projectSummary = [
-    ["经营项目", String(d.projectStats.length), "按项目聚合"],
+    ["经营项目", String(d.financeMeta.projectCount || d.projectStats.length), "按项目聚合"],
     ["派车订单", String(dispatchList.length), "调度任务数量"],
     ["执行中合同", String(contracts.filter((v) => v.status === "执行中").length), "履约中的合同"],
     ["待回款项目", String(d.projectStats.filter((v) => v.unreceived > 0).length), "需持续跟进"],
@@ -486,8 +515,8 @@ function rowActions(type, id) {
 }
 
 function renderActionButtons() {
-  $$("[data-open]").forEach((btn) => {
-    btn.style.display = canOpen(btn.dataset.open) ? "" : "none";
+  $$('[data-open]').forEach((btn) => {
+    btn.style.display = canOpen(btn.dataset.open) ? '' : 'none';
   });
 }
 
@@ -533,15 +562,60 @@ function renderContracts() {
     .join("") || `<tr><td colspan="6"><div class="empty">暂无合同台账</div></td></tr>`;
 }
 
+function matchesFinanceStatus(item) {
+  if (state.financeStatus === "all") return true;
+  if (state.financeStatus === "overdue") return item.overdueLevel === "danger" && item.status !== "已回款";
+  return item.status === state.financeStatus;
+}
+
+function matchesFinanceDimension(item) {
+  if (state.financeCustomer !== "all" && item.customerName !== state.financeCustomer) return false;
+  if (state.financeContract !== "all" && item.contractCode !== state.financeContract) return false;
+  return true;
+}
+
+function financeFilteredSettlements(includePaid = true) {
+  return state.data.settlements
+    .filter((v) => matchesFinanceStatus(v) && matchesFinanceDimension(v) && (includePaid || v.status !== "已回款"))
+    .sort((a, b) => {
+      const levelOrder = { danger: 0, warn: 1, ok: 2 };
+      const dueCompare = (a.dueDate || "").localeCompare(b.dueDate || "");
+      const levelCompare = (levelOrder[a.overdueLevel] || 9) - (levelOrder[b.overdueLevel] || 9);
+      if (levelCompare !== 0) return levelCompare;
+      if (dueCompare !== 0) return dueCompare;
+      return Number(b.unreceived || 0) - Number(a.unreceived || 0);
+    });
+}
+
+function syncFinanceFilters() {
+  const customerSelect = $("#finance-customer-filter");
+  const contractSelect = $("#finance-contract-filter");
+  if (!customerSelect || !contractSelect) return;
+  const customers = [...new Set(state.data.settlements.map((v) => v.customerName).filter(Boolean))];
+  const contracts = [...new Set(state.data.settlements.map((v) => v.contractCode).filter(Boolean))];
+  customerSelect.innerHTML = [`<option value="all">全部客户</option>`].concat(customers.map((name) => `<option value="${name}">${name}</option>`)).join("");
+  contractSelect.innerHTML = [`<option value="all">全部合同</option>`].concat(contracts.map((code) => `<option value="${code}">${code}</option>`)).join("");
+  customerSelect.value = customers.includes(state.financeCustomer) ? state.financeCustomer : "all";
+  contractSelect.value = contracts.includes(state.financeContract) ? state.financeContract : "all";
+  state.financeCustomer = customerSelect.value;
+  state.financeContract = contractSelect.value;
+}
+
 function renderSettlements() {
   const q = state.q.trim();
-  const rows = state.data.settlements.filter((v) => !q || Object.values(v).join(" ").includes(q));
+  const rows = financeFilteredSettlements()
+    .filter((v) => !q || Object.values(v).join(" ").includes(q));
   $("#settlement-rows").innerHTML = rows
-    .map((v) => `<tr><td><div>${v.code}</div>${rowActions("settlement", v.id)}</td><td>${v.contractCode}</td><td>${v.customerName}</td><td>${v.projectName}</td><td>${Number(v.receivable || 0).toFixed(2)}</td><td>${Number(v.received || 0).toFixed(2)}</td><td><span class="${badgeClass(v.status === "已回款" ? "ok" : "warn")}">${v.status}</span></td><td>${v.dueDate}</td></tr>`)
+    .map((v) => `<tr><td><div>${v.code}</div>${rowActions("settlement", v.id)}</td><td>${v.contractCode}</td><td>${v.customerName}</td><td>${v.projectName}</td><td>${Number(v.receivable || 0).toFixed(2)}</td><td>${Number(v.received || 0).toFixed(2)}</td><td><span class="${badgeClass(v.status === "已回款" ? "ok" : v.overdueLevel === "danger" ? "danger" : "warn")}">${v.status}</span></td><td>${v.dueDate}</td></tr>`)
     .join("") || `<tr><td colspan="8"><div class="empty">暂无结算单</div></td></tr>`;
 }
 
 function renderFinance() {
+  const q = state.q.trim();
+  const overdueRows = financeFilteredSettlements(false)
+    .filter((v) => !q || Object.values(v).join(" ").includes(q));
+  const overdueCount = overdueRows.filter((v) => v.overdueLevel === "danger").length;
+
   $("#finance-summary").innerHTML = state.data.financeSummary
     .map(([label, value, tip]) => `<article class="metric"><span class="muted">${label}</span><strong>${value}</strong><small class="muted">${tip}</small></article>`)
     .join("");
@@ -550,10 +624,15 @@ function renderFinance() {
     .join("");
   renderList("#finance-insights", state.data.financeInsights, (v) => `<div class="list-item"><strong>${v[0]}</strong><span class="${v[2]}">${v[1]}</span></div>`);
   $("#project-rows").innerHTML = state.data.projectStats
-    .filter((v) => !state.q.trim() || Object.values(v).join(" ").includes(state.q.trim()))
+    .filter((v) => !q || Object.values(v).join(" ").includes(q))
     .map((v) => `<tr><td>${v.projectName}</td><td>${v.customerName}</td><td>${v.orderCount}</td><td>${money(v.contractAmount)}</td><td>${money(v.receivable)}</td><td>${money(v.received)}</td><td><span class="${badgeClass(v.unreceived > 0 ? "warn" : "ok")}">${money(v.unreceived)}</span></td></tr>`)
     .join("") || `<tr><td colspan="7"><div class="empty">暂无项目经营数据</div></td></tr>`;
+  $("#finance-overdue-rows").innerHTML = overdueRows
+    .map((v) => `<tr><td>${v.code}</td><td>${v.customerName}</td><td>${v.projectName}</td><td>${money(v.receivable)}</td><td>${money(v.received)}</td><td><span class="${badgeClass(v.unreceived > 0 ? (v.overdueLevel === "danger" ? "danger" : "warn") : "ok")}">${money(v.unreceived)}</span></td><td>${v.dueDate}</td><td><span class="${badgeClass(v.status === "已回款" ? "ok" : v.overdueLevel === "danger" ? "danger" : "warn")}">${v.overdueLevel === "danger" ? `逾期 · ${v.status}` : v.status}</span></td></tr>`)
+    .join("") || `<tr><td colspan="8"><div class="empty">当前没有待跟进回款</div></td></tr>`;
   renderList("#report-actions", state.data.reportActions, (v) => `<div class="list-item"><div><strong>${v[0]}</strong><p>${v[1]}</p></div><button class="ghost mini" type="button" data-export="${v[2]}">导出</button></div>`);
+  const summaryHint = document.querySelector("[data-panel='finance'] .section-head h3");
+  if (summaryHint) summaryHint.textContent = overdueCount > 0 ? `客户合同与结算（逾期 ${overdueCount} 笔）` : "客户合同与结算";
   renderCustomers();
   renderContracts();
   renderSettlements();
@@ -594,6 +673,26 @@ function openAlerts() {
   renderList("#modal-body", state.data.alerts, (v) => `<div class="list-item"><div><strong>${v[0]}</strong><p>${v[1]}</p></div><span class="${badgeClass(v[2])}">${v[2] === "danger" ? "紧急" : "提醒"}</span></div>`);
 }
 
+function formFieldControl(type, name, kind, options, value, reqAttr, extraAttr) {
+  if (type === "dispatch" && name === "customer") {
+    const opts = state.data.customers.map((item) => item.name);
+    return `<select name="${name}" ${reqAttr}><option value="">请选择客户</option>${opts.map((opt) => `<option value="${opt}" ${opt === value ? "selected" : ""}>${opt}</option>`).join("")}</select>`;
+  }
+  if ((type === "dispatch" && name === "contractCode") || (type === "settlement" && name === "contractCode")) {
+    const opts = state.data.contracts.map((item) => item.code);
+    return `<select name="${name}" ${reqAttr}><option value="">请选择合同</option>${opts.map((opt) => `<option value="${opt}" ${opt === value ? "selected" : ""}>${opt}</option>`).join("")}</select>`;
+  }
+  if ((type === "dispatch" && name === "project") || (type === "settlement" && name === "projectName")) {
+    const opts = [...new Set(state.data.contracts.map((item) => item.projectName).filter(Boolean))];
+    return `<select name="${name}" ${reqAttr}><option value="">请选择项目</option>${opts.map((opt) => `<option value="${opt}" ${opt === value ? "selected" : ""}>${opt}</option>`).join("")}</select>`;
+  }
+  if (kind === "select") {
+    return `<select name="${name}" ${reqAttr}>${options.map((opt) => `<option value="${opt}" ${opt === value ? "selected" : ""}>${opt}</option>`).join("")}</select>`;
+  }
+  const readonly = (type === "settlement" && (name === "customerName" || name === "projectName")) ? "readonly" : "";
+  return `<input name="${name}" type="${kind}" value="${name === "password" ? "" : value}" ${reqAttr} ${extraAttr} ${readonly} />`;
+}
+
 function openForm(type, id) {
   state.formType = type;
   state.editId = id || "";
@@ -606,9 +705,7 @@ function openForm(type, id) {
       const required = !(type === "user" && name === "password" && id);
       const reqAttr = required ? "required" : "";
       const extraAttr = kind === "number" ? 'step="0.01"' : "";
-      const control = kind === "select"
-        ? `<select name="${name}" ${reqAttr}>${options.map((opt) => `<option value="${opt}" ${opt === value ? "selected" : ""}>${opt}</option>`).join("")}</select>`
-        : `<input name="${name}" type="${kind}" value="${name === "password" ? "" : value}" ${reqAttr} ${extraAttr} />`;
+      const control = formFieldControl(type, name, kind, options, value, reqAttr, extraAttr);
       return `<div class="field ${full ? "full" : ""}"><label>${label}</label>${control}</div>`;
     })
     .join("") + `<div class="form-actions"><button class="ghost" id="cancel-form" type="button">取消</button><button type="submit">${id ? "保存修改" : "确认新增"}</button></div>`;
@@ -623,6 +720,35 @@ function closeForm() {
 function bindFormAssist(type) {
   const form = $("#entity-form");
   if (!form) return;
+
+  const syncContractRelated = () => {
+    const contractCode = form.elements.contractCode && form.elements.contractCode.value;
+    const contract = state.data.contracts.find((item) => item.code === contractCode);
+    if (!contract) return;
+    if (type === "settlement") {
+      if (form.elements.customerName) form.elements.customerName.value = contract.customerName || "";
+      if (form.elements.projectName) form.elements.projectName.value = contract.projectName || "";
+      if (form.elements.status && !form.elements.received.value) form.elements.status.value = "待回款";
+    }
+    if (type === "dispatch") {
+      if (form.elements.customer) form.elements.customer.value = contract.customerName || form.elements.customer.value;
+      if (form.elements.project) form.elements.project.value = contract.projectName || form.elements.project.value;
+      if (form.elements.settlementStatus && !form.elements.settlementStatus.value) form.elements.settlementStatus.value = "待回款";
+    }
+  };
+
+  const syncProjectFromCustomer = () => {
+    if (type !== "dispatch") return;
+    const customer = form.elements.customer && form.elements.customer.value;
+    const projectEl = form.elements.project;
+    const contractEl = form.elements.contractCode;
+    if (!projectEl || !contractEl) return;
+    const contracts = state.data.contracts.filter((item) => !customer || item.customerName === customer);
+    const projectOptions = [...new Set(contracts.map((item) => item.projectName).filter(Boolean))];
+    projectEl.innerHTML = `<option value="">请选择项目</option>${projectOptions.map((opt) => `<option value="${opt}" ${opt === projectEl.value ? "selected" : ""}>${opt}</option>`).join("")}`;
+    contractEl.innerHTML = `<option value="">请选择合同</option>${contracts.map((item) => `<option value="${item.code}" ${item.code === contractEl.value ? "selected" : ""}>${item.code}</option>`).join("")}`;
+  };
+
   const calcAmount = () => {
     if (type === "energy") {
       const volume = Number(form.elements.volume && form.elements.volume.value || 0);
@@ -639,7 +765,23 @@ function bindFormAssist(type) {
       else if (received > 0 && received < receivable) statusEl.value = "部分回款";
     }
   };
+
+  if (form.elements.contractCode) {
+    form.elements.contractCode.addEventListener("change", () => {
+      syncContractRelated();
+      calcAmount();
+    });
+  }
+  if (type === "dispatch" && form.elements.customer) {
+    form.elements.customer.addEventListener("change", () => {
+      syncProjectFromCustomer();
+    });
+  }
+
   form.addEventListener("input", calcAmount);
+  syncProjectFromCustomer();
+  syncContractRelated();
+  calcAmount();
 }
 
 function renderStaticLists() {
@@ -654,6 +796,7 @@ function renderStaticLists() {
 
 function renderAll() {
   syncDerived();
+  syncFinanceFilters();
   renderActionButtons();
   renderStaticLists();
   renderMetrics();
@@ -676,6 +819,8 @@ async function loadBootstrap() {
   state.data.safety = body.safety || [];
   state.data.maintenance = body.maintenance || [];
   state.data.energy = body.energy || [];
+  state.data.financeMeta = body.financeMeta || state.data.financeMeta;
+  $("#finance-status-filter").value = state.financeStatus;
   renderAll();
 }
 
@@ -702,8 +847,12 @@ async function submitForm(e) {
   } else {
     list.unshift(body.item);
   }
-  closeForm();
-  renderAll();
+  if (key === "contracts" || key === "settlements") {
+    await loadBootstrap();
+  } else {
+    closeForm();
+    renderAll();
+  }
 }
 
 async function exportReport(kind) {
@@ -813,14 +962,40 @@ function bindEvents() {
   $("#export-project-report").addEventListener("click", () => exportReport("project").catch((err) => alert(err.message)));
   $("#export-settlement-report").addEventListener("click", () => exportReport("settlement").catch((err) => alert(err.message)));
   $("#finance-apply").addEventListener("click", () => {
+    state.financePreset = "";
     applyFinanceRange($("#finance-start").value, $("#finance-end").value);
   });
   $("#finance-reset").addEventListener("click", () => {
+    state.financePreset = "";
+    state.financeStatus = "all";
+    state.financeCustomer = "all";
+    state.financeContract = "all";
+    $("#finance-status-filter").value = "all";
+    $("#finance-customer-filter").value = "all";
+    $("#finance-contract-filter").value = "all";
     applyFinanceRange("", "");
+  });
+  $("#finance-status-filter").addEventListener("change", (e) => {
+    state.financeStatus = e.target.value;
+    renderFinance();
+    renderSettlements();
+  });
+  $("#finance-customer-filter").addEventListener("change", (e) => {
+    state.financeCustomer = e.target.value;
+    if (state.financeCustomer !== "all") state.financeContract = "all";
+    renderFinance();
+    renderSettlements();
+    syncFinanceFilters();
+  });
+  $("#finance-contract-filter").addEventListener("change", (e) => {
+    state.financeContract = e.target.value;
+    renderFinance();
+    renderSettlements();
   });
   $$("[data-range]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const [start, end] = rangeValues(btn.dataset.range);
+      state.financePreset = btn.dataset.range;
       applyFinanceRange(start, end);
     });
   });

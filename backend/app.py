@@ -200,6 +200,28 @@ def item_from_payload(table, payload, item_id):
     return item
 
 
+def apply_contract_defaults(item, contracts):
+    contract_code = item.get("contractCode")
+    if not contract_code:
+        return item
+    contract = None
+    for row in contracts:
+        if row.get("code") == contract_code:
+            contract = row
+            break
+    if not contract:
+        return item
+    if "customerName" in item and not item.get("customerName"):
+        item["customerName"] = contract.get("customerName") or ""
+    if "projectName" in item and not item.get("projectName"):
+        item["projectName"] = contract.get("projectName") or ""
+    if "customer" in item and not item.get("customer"):
+        item["customer"] = contract.get("customerName") or ""
+    if "project" in item and not item.get("project"):
+        item["project"] = contract.get("projectName") or ""
+    return item
+
+
 def insert_row(conn, table, item):
     fields = ["id"] + TABLE_FIELDS[table] + ["created_at", "updated_at"]
     values = [item["id"]] + [item[field] for field in TABLE_FIELDS[table]] + [now(), now()]
@@ -223,6 +245,55 @@ def settlement_status(item):
     if receivable > 0:
         return "待回款"
     return "待建账"
+
+
+def contract_status(item):
+    end_date = item.get("endDate") or ""
+    if end_date and end_date < datetime.utcnow().strftime("%Y-%m-%d"):
+        return "已到期"
+    return item.get("status") or "待启动"
+
+
+def overdue_level(due_date, status):
+    if not due_date or status == "已回款":
+        return "ok"
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    if due_date < today:
+        return "danger"
+    return "warn"
+
+
+def enrich_finance_rows(customers, contracts, settlements, dispatch):
+    customer_names = set([item.get("name") for item in customers if item.get("name")])
+    project_names = set([item.get("project") for item in dispatch if item.get("project")])
+    contract_codes = set([item.get("code") for item in contracts if item.get("code")])
+
+    for item in contracts:
+        item["status"] = contract_status(item)
+        if item.get("customerName"):
+            customer_names.add(item.get("customerName"))
+        if item.get("projectName"):
+            project_names.add(item.get("projectName"))
+        if item.get("code"):
+            contract_codes.add(item.get("code"))
+
+    for item in settlements:
+        item["status"] = settlement_status(item)
+        item["unreceived"] = float(item.get("receivable") or 0) - float(item.get("received") or 0)
+        item["overdueLevel"] = overdue_level(item.get("dueDate"), item.get("status"))
+        if item.get("customerName"):
+            customer_names.add(item.get("customerName"))
+        if item.get("projectName"):
+            project_names.add(item.get("projectName"))
+        if item.get("contractCode"):
+            contract_codes.add(item.get("contractCode"))
+
+    return {
+        "customerCount": len(customer_names),
+        "projectCount": len(project_names),
+        "contractCount": len(contract_codes),
+        "overdueSettlementCount": len([item for item in settlements if item.get("overdueLevel") == "danger"]),
+    }
 
 
 def backfill_dispatch_links(conn):
@@ -554,6 +625,7 @@ class Handler(BaseHTTPRequestHandler):
             for table, fields in TABLE_FIELDS.items():
                 sql = "select id, {0} from {1} order by created_at desc".format(", ".join(fields), table)
                 payload[table] = dict_rows(conn.execute(sql).fetchall())
+            payload["financeMeta"] = enrich_finance_rows(payload["customers"], payload["contracts"], payload["settlements"], payload["dispatch"])
             conn.close()
             return self.send(200, payload)
         if path == "/api/reports/export":
@@ -646,7 +718,15 @@ class Handler(BaseHTTPRequestHandler):
         payload = self.body()
         item = item_from_payload(table, payload, TABLE_PREFIX[table] + secrets.token_hex(6))
         conn = db()
+        if table in ["dispatch", "settlements"]:
+            item = apply_contract_defaults(item, table_rows(conn, "contracts"))
+        if table == "settlements":
+            item["status"] = settlement_status(item)
+        if table == "contracts":
+            item["status"] = contract_status(item)
         insert_row(conn, table, item)
+        if table in ["contracts", "settlements"]:
+            backfill_dispatch_links(conn)
         conn.commit()
         conn.close()
         self.send(200, {"item": item})
@@ -684,11 +764,19 @@ class Handler(BaseHTTPRequestHandler):
         payload = self.body()
         item = item_from_payload(table, payload, parts[2])
         conn = db()
+        if table in ["dispatch", "settlements"]:
+            item = apply_contract_defaults(item, table_rows(conn, "contracts"))
+        if table == "settlements":
+            item["status"] = settlement_status(item)
+        if table == "contracts":
+            item["status"] = contract_status(item)
         values = [item[field] for field in TABLE_FIELDS[table]] + [now(), parts[2]]
         conn.execute(
             "update {0} set {1}, updated_at = ? where id = ?".format(table, ", ".join(["{0} = ?".format(field) for field in TABLE_FIELDS[table]])),
             values,
         )
+        if table in ["contracts", "settlements"]:
+            backfill_dispatch_links(conn)
         conn.commit()
         conn.close()
         self.send(200, {"item": item})

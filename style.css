@@ -236,8 +236,19 @@ button.ghost {
   flex-wrap: wrap;
 }
 
-.date-range .field {
+.quick-ranges .active {
+  color: #08211f;
+  background: #d8f4ef;
+  border-color: rgba(15, 118, 110, 0.24);
+}
+
+.date-range .field,
+.finance-filter-field {
   min-width: 180px;
+}
+
+.finance-toolbar {
+  align-items: flex-end;
 }
 
 .metric,
